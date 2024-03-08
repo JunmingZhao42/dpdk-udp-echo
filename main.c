@@ -387,7 +387,7 @@ static void main_init_dhcp(void) {
 
 /* Launch a function on lcore. */
 static void
-lcore_hello(__rte_unused void *arg)
+lcore_udp(__rte_unused void *arg)
 {
     struct udp_pcb *upcb;
 	unsigned lcore_id;
@@ -505,7 +505,7 @@ int main(int argc, char *argv[])
 	unsigned lcore_id;
 	/* Launches the function on each lcore. 8< */
 	RTE_LCORE_FOREACH_WORKER(lcore_id) {
-		rte_eal_remote_launch(lcore_hello, NULL, lcore_id);
+		rte_eal_remote_launch(lcore_udp, NULL, lcore_id);
 	}
 
     // Start main loop
