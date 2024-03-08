@@ -321,6 +321,7 @@ static void udp_recv_handler(void *arg __attribute__((unused)),
 }
 
 struct netif netif = {0};
+struct rte_mbuf *rx_mbufs[MAX_PKT_BURST];
 
 static void main_init_dhcp(void) {
     // LWIP setup
@@ -354,7 +355,6 @@ static void main_init_dhcp(void) {
     param.sched_priority = DEFAULT_THREAD_PRIO;
 
     pthread_setschedparam(thread, SCHED_OTHER, &param);
-    struct rte_mbuf *rx_mbufs[MAX_PKT_BURST];
 
     dhcp_setup(&netif);
     // While waiting for DHCP, perform minimal receipt loop
