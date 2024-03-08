@@ -502,6 +502,7 @@ int main(int argc, char *argv[])
 
     main_init_dhcp();
 
+	unsigned lcore_id;
 	/* Launches the function on each lcore. 8< */
 	RTE_LCORE_FOREACH_WORKER(lcore_id) {
 		rte_eal_remote_launch(lcore_hello, NULL, lcore_id);
