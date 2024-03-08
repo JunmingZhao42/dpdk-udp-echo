@@ -317,13 +317,10 @@ static void udp_recv_handler(void *arg __attribute__((unused)),
     printf("Echoing packet to %s:%d\n", ipaddr_ntoa(addr), port);
 #endif
     pbuf_free(p);
-    // tx_flush();
+    tx_flush();
 }
-struct netif netif = {0};
-static struct udp_pcb *upcb;
-// Main loop
-static __rte_noreturn void lcore_main(void)
-{
+
+static void main_init_dhcp(void) {
     // LWIP setup
     ip4_addr_t _addr, _mask, _gate;
 
@@ -384,6 +381,18 @@ static __rte_noreturn void lcore_main(void)
         }
     }
     printf("\n\n\n\n #### DHCP REGISTERED #### \n\n\n\n");
+}
+
+struct netif netif = {0};
+
+/* Launch a function on lcore. */
+static void
+lcore_hello(__rte_unused void *arg)
+{
+    struct udp_pcb *upcb;
+	unsigned lcore_id;
+	lcore_id = rte_lcore_id();
+	printf("hello from core %u\n", lcore_id);
 
     // Set up UDP
     udp_init();
@@ -393,9 +402,11 @@ static __rte_noreturn void lcore_main(void)
 
     // Send a packet to the gateway to force LWIP to add it to the etharp cache.
     udp_sendto(upcb, pbuf_alloc(PBUF_RAW, 0, PBUF_POOL), &netif.gw, 1234);
+}
 
-
-    /* primary loop */
+// Main loop
+static __rte_noreturn void lcore_main(void)
+{
     while (1)
     {
         unsigned short i, nb_rx = rte_eth_rx_burst(0 /* port id */, 0 /* queue id */, rx_mbufs, MAX_PKT_BURST);
@@ -488,6 +499,13 @@ int main(int argc, char *argv[])
     // Sanity checks
     if (rte_lcore_count() > 1)
         printf("\nWARNING: Too many lcores enabled. Only 1 used.\n");
+
+    main_init_dhcp();
+
+	/* Launches the function on each lcore. 8< */
+	RTE_LCORE_FOREACH_WORKER(lcore_id) {
+		rte_eal_remote_launch(lcore_hello, NULL, lcore_id);
+	}
 
     // Start main loop
     lcore_main();
