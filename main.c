@@ -20,7 +20,7 @@
 static struct rte_mempool *pktmbuf_pool = NULL;
 static int mbuf_count = 0;
 static struct rte_mbuf *tx_mbufs[MAX_PKT_BURST] = {0};
- 
+
 static uint8_t _mac[6];
 
 static inline void *lwip_timeouts_thread(void *arg __attribute__((unused)))
@@ -148,7 +148,7 @@ static err_t tx_output(struct netif *netif __attribute__((unused)), struct pbuf 
     assert(p->tot_len <= RTE_MBUF_DEFAULT_BUF_SIZE);
     rte_memcpy(rte_pktmbuf_mtod(tx_mbufs[mbuf_count], void *), bufptr, p->tot_len);
     rte_pktmbuf_pkt_len(tx_mbufs[mbuf_count]) = rte_pktmbuf_data_len(tx_mbufs[mbuf_count]) = p->tot_len;
- 
+
     // Enable offloads in mbufs
     if (++mbuf_count == MAX_PKT_BURST) {
     }
@@ -209,13 +209,13 @@ static inline int port_init(uint16_t port, struct rte_mempool *mbuf_pool)
                port, strerror(-retval));
         return retval;
     }
-    
+
     // Set offload optimisations if available
-    port_conf.txmode.offloads = 
-    RTE_ETH_TX_OFFLOAD_UDP_CKSUM | 
-    RTE_ETH_TX_OFFLOAD_TCP_CKSUM | 
+    port_conf.txmode.offloads =
+    RTE_ETH_TX_OFFLOAD_UDP_CKSUM |
+    RTE_ETH_TX_OFFLOAD_TCP_CKSUM |
     RTE_ETH_TX_OFFLOAD_IPV4_CKSUM;
-    
+
     port_conf.rxmode.offloads =
     RTE_ETH_RX_OFFLOAD_CHECKSUM;
 
@@ -369,7 +369,7 @@ static __rte_noreturn void lcore_main(void)
 
             #ifdef ZEROCOPY
             assert((p = alloc_custom_pbuf(rx_mbufs[i])) != NULL);
-            
+
             #else
             assert((p = pbuf_alloc(PBUF_RAW, rte_pktmbuf_pkt_len(rx_mbufs[i]), PBUF_POOL)) != NULL);
             pbuf_take(p, rte_pktmbuf_mtod(rx_mbufs[i], void *), rte_pktmbuf_pkt_len(rx_mbufs[i]));
@@ -377,14 +377,14 @@ static __rte_noreturn void lcore_main(void)
             #endif
 
             assert(netif.input(p, &netif) == ERR_OK);
-            
+
             #ifndef ZEROCOPY
             rte_pktmbuf_free(rx_mbufs[i]);
             #endif
         }
     }
     printf("\n\n\n\n #### DHCP REGISTERED #### \n\n\n\n");
-    
+
     // Set up UDP
     udp_init();
     assert((upcb = udp_new()) != NULL);
@@ -393,18 +393,18 @@ static __rte_noreturn void lcore_main(void)
 
     // Send a packet to the gateway to force LWIP to add it to the etharp cache.
     udp_sendto(upcb, pbuf_alloc(PBUF_RAW, 0, PBUF_POOL), &netif.gw, 1234);
-    
+
 
     /* primary loop */
     while (1)
-    {   
+    {
         unsigned short i, nb_rx = rte_eth_rx_burst(0 /* port id */, 0 /* queue id */, rx_mbufs, MAX_PKT_BURST);
-        
+
 #ifdef BURST_DELAY
         for (int i = 0; i < BURST_DELAY; i++)
             asm volatile("NOP");
 #endif
-        
+
         for (i = 0; i < nb_rx; i++)
         {
 #ifdef DEBUG
@@ -422,7 +422,7 @@ static __rte_noreturn void lcore_main(void)
 
             #ifdef ZEROCOPY
             assert((p = alloc_custom_pbuf(rx_mbufs[i])) != NULL);
-            
+
             #else
             assert((p = pbuf_alloc(PBUF_RAW, rte_pktmbuf_pkt_len(rx_mbufs[i]), PBUF_POOL)) != NULL);
             pbuf_take(p, rte_pktmbuf_mtod(rx_mbufs[i], void *), rte_pktmbuf_pkt_len(rx_mbufs[i]));
@@ -430,7 +430,7 @@ static __rte_noreturn void lcore_main(void)
             #endif
 
             assert(netif.input(p, &netif) == ERR_OK);
-            
+
             #ifndef ZEROCOPY
             rte_pktmbuf_free(rx_mbufs[i]);
             #endif
@@ -462,8 +462,11 @@ int main(int argc, char *argv[])
 
     // Find ports
     nb_ports = rte_eth_dev_count_avail();
-    if (nb_ports != 2)
-        rte_exit(EXIT_FAILURE, "Error: Must have exactly 2 ports available! Actual: %u\n", nb_ports);
+    if (nb_ports >= 1) {
+        printf("\nFound %i ports, using only 1 port\n", nb_ports);
+    } else {
+        rte_exit(EXIT_FAILURE, "Error: Must have at least 1 port! Actual: %u\n", nb_ports);
+    }
 
     // Allocate rx mempool
     assert((pktmbuf_pool = rte_pktmbuf_pool_create("mbuf_pool",
@@ -481,8 +484,6 @@ int main(int argc, char *argv[])
                      portid);
         break; // only do one port for now
     }
-
-    
 
     // Sanity checks
     if (rte_lcore_count() > 1)
