@@ -320,6 +320,8 @@ static void udp_recv_handler(void *arg __attribute__((unused)),
     tx_flush();
 }
 
+struct netif netif = {0};
+
 static void main_init_dhcp(void) {
     // LWIP setup
     ip4_addr_t _addr, _mask, _gate;
@@ -382,8 +384,6 @@ static void main_init_dhcp(void) {
     }
     printf("\n\n\n\n #### DHCP REGISTERED #### \n\n\n\n");
 }
-
-struct netif netif = {0};
 
 /* Launch a function on lcore. */
 static void
