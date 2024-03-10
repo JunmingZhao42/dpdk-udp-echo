@@ -21,6 +21,35 @@ static struct rte_mempool *pktmbuf_pool = NULL;
 static int mbuf_count = 0;
 static struct rte_mbuf *tx_mbufs[MAX_PKT_BURST] = {0};
 
+/* Thread-safe queue to hold received UDP packets */
+queue_t udp_packet_queue;
+
+/* Structure to hold packet and metadata */
+typedef struct {
+    struct udp_pcb *pcb;
+    struct pbuf *p;
+    ip_addr_t addr;
+    u16_t port;
+} packet_info_t;
+
+/* Worker thread function for handling UDP receive */
+void *udp_worker_thread(void *arg) {
+    while (1) {
+        packet_info_t *info = dequeue(&udp_packet_queue);
+        if (info) {
+            /* Process the received UDP packet */
+            err_t ret = udp_sendto(info->pcb, info->p, info->addr, info->port) == ERR_OK;
+            if (ret < 0)
+            {
+                printf("WARNING: failed to transmit back to client\n");
+            }
+            pbuf_free(info->p);
+            free(info);
+        }
+    }
+    return NULL;
+}
+
 static uint8_t _mac[6];
 
 static inline void *lwip_timeouts_thread(void *arg __attribute__((unused)))
@@ -298,11 +327,14 @@ static void udp_recv_handler(void *arg __attribute__((unused)),
 #ifdef DEBUG
     printf("UDP echoing packet with length %d totallen %d\n", p->len, p->tot_len);
 #endif
-    err_t ret = udp_sendto(upcb, p, addr, port) == ERR_OK;
-    if (ret < 0)
-    {
-        printf("WARNING: failed to transmit back to client\n");
-    }
+    packet_info_t *info = malloc(sizeof(packet_info_t));
+    info->pcb = upcb;
+    info->p = p;
+    memcpy(&info->addr, addr, sizeof(ip_addr_t));
+    info->port = port;
+
+    /* Enqueue the received packet for worker threads */
+    enqueue(&udp_packet_queue, info);
 
 // Print packet
 #ifdef DEBUG
@@ -316,7 +348,6 @@ static void udp_recv_handler(void *arg __attribute__((unused)),
 
     printf("Echoing packet to %s:%d\n", ipaddr_ntoa(addr), port);
 #endif
-    pbuf_free(p);
     // tx_flush();
 }
 struct netif netif = {0};
@@ -485,9 +516,22 @@ int main(int argc, char *argv[])
         break; // only do one port for now
     }
 
-    // Sanity checks
-    if (rte_lcore_count() > 1)
-        printf("\nWARNING: Too many lcores enabled. Only 1 used.\n");
+    /* Initialize the thread-safe queue */
+    queue_init(&udp_packet_queue);
+    int num_worker_threads = 1;
+    int num_lcores = rte_lcore_count();
+    if (num_lcores > 1)
+    {
+        num_worker_threads = num_lcores - 1;
+    }
+
+    /* Create UDP handler worker threads */
+    for (int i = 0; i < num_worker_threads; i++) {
+        pthread_t thread;
+        pthread_create(&thread, NULL, udp_worker_thread, NULL);
+    }
+
+    printf("\nUsing %i worker threads for UDP packets handling.\n", num_worker_threads);
 
     // Start main loop
     lcore_main();

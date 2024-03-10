@@ -9,6 +9,7 @@
 #include <assert.h>
 #include <pthread.h>
 #include <arpa/inet.h>
+#include <queue.h>
 
 // DPDK imports
 #include <rte_common.h>
