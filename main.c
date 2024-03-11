@@ -21,8 +21,7 @@ static struct rte_mempool *pktmbuf_pool = NULL;
 static int mbuf_count = 0;
 static struct rte_mbuf *tx_mbufs[MAX_PKT_BURST] = {0};
 
-/* Thread-safe queue to hold received UDP packets */
-queue_t udp_packet_queue;
+#define UDP_QUEUE_SIZE 2048
 
 /* Structure to hold packet and metadata */
 typedef struct {
@@ -32,10 +31,63 @@ typedef struct {
     u16_t port;
 } packet_info_t;
 
+typedef struct {
+    packet_info_t **buffer;
+    size_t head;
+    size_t tail;
+    size_t count;
+    pthread_mutex_t mutex;
+    pthread_cond_t cond_full;
+    pthread_cond_t cond_empty;
+} queue_t;
+
+void queue_init(queue_t *queue) {
+    queue->buffer = malloc(UDP_QUEUE_SIZE * sizeof(packet_info_t *));
+    queue->head = 0;
+    queue->tail = 0;
+    queue->count = 0;
+    pthread_mutex_init(&queue->mutex, NULL);
+    pthread_cond_init(&queue->cond_full, NULL);
+    pthread_cond_init(&queue->cond_empty, NULL);
+}
+
+void queue_enqueue(queue_t *queue, packet_info_t *packet) {
+    pthread_mutex_lock(&queue->mutex);
+
+    while (queue->count == UDP_QUEUE_SIZE) {
+        pthread_cond_wait(&queue->cond_full, &queue->mutex);
+    }
+
+    queue->buffer[queue->tail] = packet;
+    queue->tail = (queue->tail + 1) % UDP_QUEUE_SIZE;
+    queue->count++;
+
+    pthread_cond_signal(&queue->cond_empty);
+    pthread_mutex_unlock(&queue->mutex);
+}
+
+void queue_dequeue(queue_t *queue, packet_info_t **packet) {
+    pthread_mutex_lock(&queue->mutex);
+
+    while (queue->count == 0) {
+        pthread_cond_wait(&queue->cond_empty, &queue->mutex);
+    }
+
+    *packet = queue->buffer[queue->head];
+    queue->head = (queue->head + 1) % UDP_QUEUE_SIZE;
+    queue->count--;
+
+    pthread_cond_signal(&queue->cond_full);
+    pthread_mutex_unlock(&queue->mutex);
+}
+
+queue_t udp_packet_queue;
+
 /* Worker thread function for handling UDP receive */
 void *udp_worker_thread(void *arg) {
     while (1) {
-        packet_info_t *info = dequeue(&udp_packet_queue);
+        packet_info_t *info;
+        queue_dequeue(&udp_packet_queue, &info);
         if (info) {
             /* Process the received UDP packet */
             err_t ret = udp_sendto(info->pcb, info->p, info->addr, info->port) == ERR_OK;
@@ -330,11 +382,12 @@ static void udp_recv_handler(void *arg __attribute__((unused)),
     packet_info_t *info = malloc(sizeof(packet_info_t));
     info->pcb = upcb;
     info->p = p;
-    memcpy(&info->addr, addr, sizeof(ip_addr_t));
+    info->addr = addr;
+    // memcpy(&info->addr, addr, sizeof(ip_addr_t));
     info->port = port;
 
     /* Enqueue the received packet for worker threads */
-    enqueue(&udp_packet_queue, info);
+    queue_enqueue(&udp_packet_queue, info);
 
 // Print packet
 #ifdef DEBUG
