@@ -27,7 +27,7 @@ static struct rte_mbuf *tx_mbufs[MAX_PKT_BURST] = {0};
 typedef struct {
     struct udp_pcb *pcb;
     struct pbuf *p;
-    ip_addr_t* addr;
+    ip_addr_t addr;
     u16_t port;
 } packet_info_t;
 
@@ -86,11 +86,11 @@ queue_t udp_packet_queue;
 /* Worker thread function for handling UDP receive */
 void *udp_worker_thread(void *arg) {
     while (1) {
-        packet_info_t *info = malloc(sizeof(packet_info_t *));
+        packet_info_t *info;
         queue_dequeue(&udp_packet_queue, &info);
         if (info) {
             /* Process the received UDP packet */
-            err_t ret = udp_sendto(info->pcb, info->p, info->addr, info->port) == ERR_OK;
+            err_t ret = udp_sendto(info->pcb, info->p, &(info->addr), info->port) == ERR_OK;
             if (ret < 0)
             {
                 printf("WARNING: failed to transmit back to client\n");
@@ -382,8 +382,7 @@ static void udp_recv_handler(void *arg __attribute__((unused)),
     packet_info_t *info = malloc(sizeof(packet_info_t));
     info->pcb = upcb;
     info->p = p;
-    info->addr = addr;
-    // memcpy(&info->addr, addr, sizeof(ip_addr_t));
+    memcpy(&info->addr, addr, sizeof(ip_addr_t));
     info->port = port;
 
     /* Enqueue the received packet for worker threads */
