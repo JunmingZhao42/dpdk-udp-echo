@@ -8,6 +8,7 @@
 
 // Uncomment below for debugging output
 // #define DEBUG
+#define MY_DEBUG
 
 // Uncomment below for zero copy LWIP - note that this inexplicably makes things slower
 // #define ZEROCOPY
@@ -90,6 +91,9 @@ void *udp_worker_thread(void *arg) {
         queue_dequeue(&udp_packet_queue, &info);
         if (info) {
             /* Process the received UDP packet */
+#ifdef MY_DEBUG
+            printf("Dequeue: info->pcb %p, info->p %p, &(info->addr) %i, info->port %i\n", info->pcb, info->p, &(info->addr), info->port);
+#endif
             err_t ret = udp_sendto(info->pcb, info->p, &(info->addr), info->port) == ERR_OK;
             if (ret < 0)
             {
@@ -385,6 +389,9 @@ static void udp_recv_handler(void *arg __attribute__((unused)),
     memcpy(&info->addr, addr, sizeof(ip_addr_t));
     info->port = port;
 
+#ifdef MY_DEBUG
+    printf("Enqueue: info->pcb %p, info->p %p, &(info->addr) %i, info->port %i\n", info->pcb, info->p, &(info->addr), info->port);
+#endif
     /* Enqueue the received packet for worker threads */
     queue_enqueue(&udp_packet_queue, info);
 
