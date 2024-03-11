@@ -27,7 +27,7 @@ static struct rte_mbuf *tx_mbufs[MAX_PKT_BURST] = {0};
 typedef struct {
     struct udp_pcb *pcb;
     struct pbuf *p;
-    ip_addr_t addr;
+    ip_addr_t* addr;
     u16_t port;
 } packet_info_t;
 
@@ -86,7 +86,7 @@ queue_t udp_packet_queue;
 /* Worker thread function for handling UDP receive */
 void *udp_worker_thread(void *arg) {
     while (1) {
-        packet_info_t *info;
+        packet_info_t *info = malloc(sizeof(packet_info_t *));
         queue_dequeue(&udp_packet_queue, &info);
         if (info) {
             /* Process the received UDP packet */
