@@ -8,7 +8,7 @@
 
 // Uncomment below for debugging output
 // #define DEBUG
-#define MY_DEBUG
+// #define THRESHOLD_TIME 0.5
 
 // Uncomment below for zero copy LWIP - note that this inexplicably makes things slower
 // #define ZEROCOPY
@@ -21,8 +21,6 @@
 static struct rte_mempool *pktmbuf_pool = NULL;
 static int mbuf_count = 0;
 static struct rte_mbuf *tx_mbufs[MAX_PKT_BURST] = {0};
-
-#define UDP_QUEUE_SIZE 2048
 
 /* Structure to hold packet and metadata */
 typedef struct {
@@ -55,9 +53,22 @@ void queue_init(queue_t *queue) {
 void queue_enqueue(queue_t *queue, packet_info_t *packet) {
     pthread_mutex_lock(&queue->mutex);
 
+#ifdef THRESHOLD_TIME
+    clock_t start_time = clock();
+#endif
+
     while (queue->count == UDP_QUEUE_SIZE) {
         pthread_cond_wait(&queue->cond_full, &queue->mutex);
     }
+
+#ifdef THRESHOLD_TIME
+    clock_t end_time = clock();
+    double wait_time = (double)(end_time - start_time) / CLOCKS_PER_SEC;
+
+    if (wait_time > THRESHOLD_TIME) {
+        printf("Producer waited for %.2f seconds in enqueue condition\n", wait_time);
+    }
+#endif
 
     queue->buffer[queue->tail] = packet;
     queue->tail = (queue->tail + 1) % UDP_QUEUE_SIZE;
@@ -70,15 +81,27 @@ void queue_enqueue(queue_t *queue, packet_info_t *packet) {
 void queue_dequeue(queue_t *queue, packet_info_t **packet) {
     pthread_mutex_lock(&queue->mutex);
 
+#ifdef THRESHOLD_TIME
+    clock_t start_time = clock();
+#endif
+
     while (queue->count == 0) {
         pthread_cond_wait(&queue->cond_empty, &queue->mutex);
     }
+
+#ifdef THRESHOLD_TIME
+    clock_t end_time = clock();
+    double wait_time = (double)(end_time - start_time) / CLOCKS_PER_SEC;
+
+    if (wait_time > THRESHOLD_TIME) {
+        printf("Consumer waited for %.2f seconds in enqueue condition\n", wait_time);
+    }
+#endif
 
     *packet = queue->buffer[queue->head];
     queue->head = (queue->head + 1) % UDP_QUEUE_SIZE;
     queue->count--;
 
-    pthread_cond_signal(&queue->cond_full);
     pthread_mutex_unlock(&queue->mutex);
 }
 
@@ -91,9 +114,6 @@ void *udp_worker_thread(void *arg) {
         queue_dequeue(&udp_packet_queue, &info);
         if (info) {
             /* Process the received UDP packet */
-#ifdef MY_DEBUG
-            printf("Dequeue: info->pcb %p, info->p %p, &(info->addr) %i, info->port %i\n", info->pcb, info->p, &(info->addr), info->port);
-#endif
             err_t ret = udp_sendto(info->pcb, info->p, &(info->addr), info->port) == ERR_OK;
             if (ret < 0)
             {
@@ -101,6 +121,9 @@ void *udp_worker_thread(void *arg) {
             }
             pbuf_free(info->p);
             free(info);
+
+            // NOTE: only after pbuf_free can we truely enqueue new entries...
+            pthread_cond_signal(&(udp_packet_queue.cond_full));
         }
     }
     return NULL;
@@ -389,9 +412,6 @@ static void udp_recv_handler(void *arg __attribute__((unused)),
     memcpy(&info->addr, addr, sizeof(ip_addr_t));
     info->port = port;
 
-#ifdef MY_DEBUG
-    printf("Enqueue: info->pcb %p, info->p %p, &(info->addr) %i, info->port %i\n", info->pcb, info->p, &(info->addr), info->port);
-#endif
     /* Enqueue the received packet for worker threads */
     queue_enqueue(&udp_packet_queue, info);
 
@@ -495,7 +515,8 @@ static __rte_noreturn void lcore_main(void)
             asm volatile("NOP");
 #endif
 
-        for (i = 0; i < nb_rx; i++)
+        i = 0;
+        while (i < nb_rx)
         {
 #ifdef DEBUG
             uint8_t *data = rte_pktmbuf_mtod(rx_mbufs[i], uint8_t *);
@@ -514,7 +535,18 @@ static __rte_noreturn void lcore_main(void)
             assert((p = alloc_custom_pbuf(rx_mbufs[i])) != NULL);
 
             #else
-            assert((p = pbuf_alloc(PBUF_RAW, rte_pktmbuf_pkt_len(rx_mbufs[i]), PBUF_POOL)) != NULL);
+            if ((p = pbuf_alloc(PBUF_RAW, rte_pktmbuf_pkt_len(rx_mbufs[i]), PBUF_POOL)) == NULL) {
+#ifdef BURST_DELAY
+                for (int i = 0; i < BURST_DELAY*100; i++) {
+                    asm volatile("NOP");
+                }
+#endif
+#ifdef DEBUG
+                printf("\nPbuf Buffer is full\n");
+#endif
+                // if the buffer is full then we have to drop packets
+                continue;
+            }
             pbuf_take(p, rte_pktmbuf_mtod(rx_mbufs[i], void *), rte_pktmbuf_pkt_len(rx_mbufs[i]));
             p->len = p->tot_len = rte_pktmbuf_pkt_len(rx_mbufs[i]);
             #endif
@@ -524,6 +556,8 @@ static __rte_noreturn void lcore_main(void)
             #ifndef ZEROCOPY
             rte_pktmbuf_free(rx_mbufs[i]);
             #endif
+
+            i++;
         }
         tx_flush();
     }

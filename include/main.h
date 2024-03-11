@@ -60,4 +60,5 @@
 #define MEMPOOL_CACHE_SIZE (256)
 #define PACKET_BUF_SIZE (1518)
 #define NUM_MBUFS (8192)
+#define UDP_QUEUE_SIZE (8192)
 
